@@ -26,8 +26,7 @@ import time
 import random
 from utils.data_utils import read_client_data
 from utils.dlg import DLG
-from utils.data_utils import add_noise , calculate_uplink_delay, calculate_downlik_delay, calculate_noise_weights , calculate_num_clients
-from channel.channel import cdl_channel_user
+from utils.data_utils import add_noise_model, add_noise_parameter , calculate_uplink_delay, calculate_downlik_delay, calculate_noise_weights , calculate_num_clients
 
 class Server(object):
     def __init__(self, args, times):
@@ -88,7 +87,7 @@ class Server(object):
         self.dlg_eval = args.dlg_eval
         self.round_counter = 0
         self.dlg_gap = args.dlg_gap
-        self.num_subchannels = 5
+        self.num_subchannels = 10
         self.batch_num_per_client = args.batch_num_per_client
         self.client_entropy_selected = []
 
@@ -104,12 +103,10 @@ class Server(object):
         for i, train_slow, send_slow in zip(range(self.num_clients), self.train_slow_clients, self.send_slow_clients):
             train_data = read_client_data(self.dataset, i, is_train=True)
             test_data = read_client_data(self.dataset, i, is_test=True)
-            val_data = read_client_data(self.dataset, i, is_val=True)        
         
             client = clientObj(self.args, 
                             id=i, 
                             train_samples=len(train_data),
-                            val_samples=len(val_data), 
                             test_samples=len(test_data), 
                             train_slow=train_slow, 
                             send_slow=send_slow, 
@@ -118,10 +115,10 @@ class Server(object):
             
 
 
-        df = pd.read_csv('/home/rebecca/fedlearn_cq/PFLlib_modified/system/channel_metrics.csv')
+        df = pd.read_csv('/home/rebeca/Federated-Learning-CQ/system/channel/channel_metrics.csv')
         
         idx = [i for i in range(self.num_clients)]
-        snr_lim = 5
+        snr_lim = -7
         for i in idx:
             # Selecionando um índice aleatório
             random_index = random.randint(0, len(df) - 1)
@@ -135,7 +132,7 @@ class Server(object):
             self.snr.append(snr)
             self.data_rate.append(data_rate)
             
-            if self.client_selection == "cq":
+            if self.client_selection == "cq" or "cq_entropy":
                 print(f'client = {i}  SNR = {snr}')
                 if snr >= snr_lim: 
                     weights = calculate_noise_weights(no)
@@ -143,11 +140,17 @@ class Server(object):
                     self.select_clients_index.append(i)
                 
 
-        self.weights_list = [round(weight, 8) for weight in weight_list]
-        self.weights_list = np.array(self.weights_list / np.sum(self.weights_list)).tolist()
+        self.weights_list = [round(weight, 10) for weight in weight_list]
+
+        exp_weights = np.exp(self.weights_list - np.max(self.weights_list))  # Subtraindo o máximo para estabilidade numérica
+        print(f'nao normalizado: {self.weights_list}')
+        self.weights_list = (exp_weights / np.sum(exp_weights)).tolist()
+        print(f'normalizado: {self.weights_list}')
+
+        #self.weights_list = (np.array(self.weights_list) / norm).tolist()
+
             
         print(f'index: {self.select_clients_index}')
-        print(f'weights list = {self.weights_list}')
 
 
         # idx = [i for i in range(self.num_clients)]
@@ -228,6 +231,36 @@ class Server(object):
             
                 selected_clients = [self.clients[i] for i in self.select_clients_index]
         
+        elif self.client_selection == "cq_entropy":
+            if self.random_join_ratio:
+                #Número de clientes selecionado aleatoriamente  
+                self.current_num_join_clients = np.random.choice(range(self.num_join_clients, self.num_clients+1), 1, replace=False)[0]
+            else:
+                self.current_num_join_clients = self.num_join_clients
+            
+            if self.round_counter == 0:
+                selected_clients = list(np.random.choice(self.clients, self.num_subchannels, replace=False))
+            else:
+                entropies = np.array([client.client_entropy() for client in self.clients])
+                entropies[np.isnan(entropies)] = 0
+
+                for client, entropy in zip(self.clients, entropies):
+                    client.entropy = entropy
+
+                combined_metric = entropies * self.weights_list
+
+                    # Ordenar os índices dos clientes por entropia em ordem decrescente
+                indices_sorted_by_entropy = np.argsort(combined_metric)[::-1]
+
+                    # pega os top 25% clients
+                selected_indices = indices_sorted_by_entropy[:self.num_subchannels]
+                print(f'Selected índices: {selected_indices}')
+                    
+                selected_clients = [self.clients[i] for i in selected_indices]
+
+            self.round_counter += 1
+
+
         elif self.client_selection == "entropy":
             if self.random_join_ratio:
                 #Número de clientes selecionado aleatoriamente  
@@ -243,19 +276,20 @@ class Server(object):
 
                 for client, entropy in zip(self.clients, entropies):
                     client.entropy = entropy
-                   
+
+                combined_metric = entropies
+
                 # Ordenar os índices dos clientes por entropia em ordem decrescente
-                indices_sorted_by_entropy = np.argsort(entropies)[::-1]
+                indices_sorted_by_entropy = np.argsort(combined_metric)[::-1]
 
                 # pega os top 25% clients
                 m = 0.25 * 20
-                selected_indices = indices_sorted_by_entropy[:5]
+                selected_indices = indices_sorted_by_entropy[:self.num_subchannels]
                 print(f'Selected índices: {selected_indices}')
                 
                 selected_clients = [self.clients[i] for i in selected_indices]
 
             self.round_counter += 1
-
 
         return selected_clients
     
@@ -274,7 +308,7 @@ class Server(object):
             client.send_time_cost['num_rounds'] += 1
             #Calcula o tempo gasto na operação de envio e o multiplica por 2
             #client.send_time_cost['total_cost'] += 2 * (time.time() - start_time)
-            client.send_time_cost['total_cost'] += calculate_downlik_delay(self.global_model, 1e6) 
+            client.send_time_cost['total_cost'] += calculate_downlik_delay(self.global_model, 10e6) 
             
 
     def receive_models(self):
@@ -293,6 +327,10 @@ class Server(object):
         if self.client_selection == "entropy":
             active_clients = random.sample(self.selected_clients, self.num_subchannels)
             #active_clients = self.selected_clients
+        
+        if self.client_selection == "cq_entropy":
+            active_clients = random.sample(self.selected_clients, self.num_subchannels)
+
             
         self.uploaded_ids = [] 
         self.uploaded_weights = []
@@ -309,11 +347,10 @@ class Server(object):
                 data_rate = self.data_rate[client.id]
                 no = self.no[client.id]
                 snr = self.snr[client.id]
-
                 client.receive_time_cost['num_rounds'] += 1
                 client.receive_time_cost['total_cost'] += calculate_uplink_delay(client.model, data_rate) 
 
-                # uplink_delay = calculate_uplink_delay(client.model, data_rate)
+                #uplink_delay = calculate_uplink_delay(client.model, data_rate)
                 mean_training_time =  (client.train_time_cost['total_cost'] / client.train_time_cost['num_rounds'])
                 mean_downlink_delay = (client.send_time_cost['total_cost'] / client.send_time_cost['num_rounds'])
                 mean_uplink_delay = (client.receive_time_cost['total_cost'] / client.receive_time_cost['num_rounds'])
@@ -321,17 +358,9 @@ class Server(object):
                 
                 client_time_cost = mean_training_time + mean_downlink_delay + mean_uplink_delay
                 total_delay_round += client_time_cost
-                #print(total_delay_round)
                 
-                print(f'Client {client.id}')
-                #       f'SNR = {snr:.3f} 
-                #       f'Noise Level = {no:.3f} '
-                #       f'Time cost = {client_time_cost:.5f} '
-                #       f'Train delay = {mean_training_time:.3f} '
-                #       f'Downlink delay = {mean_downlink_delay:.3f} '
-                #       f'Uplink delay = {mean_uplink_delay:.3f}'
+                print(f'Client {client.id}  SNR = {snr:.1f} data rate = {(data_rate):.2f} Mbs  Train delay = {mean_training_time:.3f}s Downlink delay = {mean_downlink_delay:.3f}s Uplink delay = {mean_uplink_delay:.3f}s client time cost: {client_time_cost:.3f}s')
                 #     #   f'Bandwidth = {bandwidth}'
-                # )
 
                 # client_time_cost = client.train_time_cost['total_cost'] / client.train_time_cost['num_rounds'] + \
                 #         client.send_time_cost['total_cost'] / client.send_time_cost['num_rounds']
@@ -341,13 +370,17 @@ class Server(object):
             #Limite de Tempo 
             if client_time_cost <= self.time_threthold: 
                 tot_samples += client.train_samples
+                "se o modelo chegar antes do tempo estabelecido, ele registra o id do cliente"
                 self.uploaded_ids.append(client.id)
-                #add_noise(client.train_samples, no)
                 #client.train_samples+=no
+                "registra os pesos do modelo do cliente"
                 self.uploaded_weights.append(client.train_samples)
                 #Adding noise 
-                #add_noise(client.model, no)
+                "registra o modelo do cliente"
+                add_noise_model(client.model, no)
                 self.uploaded_models.append(client.model)
+            else:
+                print(f'lost client:{client.id}')
         
         self.mean_delay_per_round.append((total_delay_round)/len(active_clients))
 
@@ -410,7 +443,7 @@ class Server(object):
             os.makedirs(result_path)
 
         if len(self.rs_test_acc):
-            algo = algo + "_" + self.goal + "_" + "entropy_noiseless_noniid_simple"
+            algo = algo + "_" + self.goal + "_" + "random_noise2_noniid"
             file_path = os.path.join(result_path, "{}.csv".format(algo))
             print("File path: " + file_path)
 

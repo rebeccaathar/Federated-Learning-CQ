@@ -35,13 +35,22 @@ def calculate_num_clients(min, max):
     return np.random.randint(min, max + 1)
 
 
-def add_noise(model, noise):
+def add_noise_parameter(parameter, noise):
+    
+    print(f'numero de samples: {parameter}')
+    parameter= np.random.randn(parameter) * noise
+    print(f'samples dois do ruído: {parameter}')
+
+
+def add_noise_model(model, noise):
     for param in model.parameters():
         #Gera um tensor com a mesma forma que param.data, 
         #contendo valores aleatórios de uma distribuição normal padrão (média 0, desvio padrão 1).
         #Ajusta a escala do ruído multiplicando pelo desvio padrão noise_std.
         param.data += torch.randn_like(param.data) * noise
-        #param.data += noise
+
+
+
 # def add_noise(model, noise_std):
 #     for param in model.parameters():
 #         noise = torch.randn_like(param.data) * noise_std
@@ -54,7 +63,7 @@ def get_data_size(model):
     total_size = 0
     for param in model.parameters():
         total_size += param.element_size() * param.numel()
-    return total_size
+    return total_size 
 
 
 def calculate_downlik_delay(server_parameters, server_data_rate):
@@ -62,9 +71,10 @@ def calculate_downlik_delay(server_parameters, server_data_rate):
     delay_downlink = parameters_size/server_data_rate
     return delay_downlink
 
-def calculate_uplink_delay(client_parameters, client_data_rate):
-    parameters_size = get_data_size(client_parameters)
-    delay_uplink = parameters_size/client_data_rate
+def calculate_uplink_delay(client_model, client_data_rate):
+    parameters_model = get_data_size(client_model) #bytes
+    #print(f'parameter size: {parameters_model}')
+    delay_uplink = parameters_model*8/client_data_rate #bit/bits/s 
     return delay_uplink
 
 def calculate_data_rate(bandwidth, snr_db, num_bits_per_symbol, coderate):

@@ -437,7 +437,7 @@ if __name__ == "__main__":
                         help="The rate for slow clients when sending global model")
     parser.add_argument('-ts', "--time_select", type=bool, default=False,
                         help="Whether to group and select clients at each round according to time cost")
-    parser.add_argument('-tth', "--time_threthold", type=float, default=1000000,
+    parser.add_argument('-tth', "--time_threthold", type=float, default=5,
                         help="The threthold for droping slow clients")
     # pFedMe / PerAvg / FedProx / FedAMP / FedPHP / GPFL / FedCAC
     parser.add_argument('-bt', "--beta", type=float, default=0.0)

@@ -40,6 +40,10 @@ class clientProx(Client):
             gamma=args.learning_rate_decay_gamma
         )
 
+    def client_entropy(self):
+        entropy_client = self.calculate_data_entropy()
+        return entropy_client
+    
     def train(self):
         trainloader = self.load_train_data()
         start_time = time.time()

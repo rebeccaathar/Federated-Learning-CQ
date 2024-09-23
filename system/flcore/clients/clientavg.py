@@ -23,8 +23,8 @@ from flcore.clients.clientbase import Client
 
 
 class clientAVG(Client):
-    def __init__(self, args, id, train_samples, val_samples, test_samples, **kwargs):
-        super().__init__(args, id, train_samples, val_samples, test_samples, **kwargs)
+    def __init__(self, args, id, train_samples, test_samples, **kwargs):
+        super().__init__(args, id, train_samples, test_samples, **kwargs)
 
     def client_entropy(self):
         entropy_client = self.calculate_data_entropy()
